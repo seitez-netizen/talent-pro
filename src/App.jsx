@@ -5,13 +5,16 @@ import {
   ChevronRight, Save, X, Camera, DollarSign, Calendar as CalendarIcon, UserCheck, 
   Archive, Download, UserX, MapPin, CreditCard, MessageSquare,
   ArrowUpDown, Filter, RefreshCw, BarChart3, ChevronDown, History, Database,
-  Clock, Star, ThumbsUp, Gift, Megaphone, FileDown, Gift as GiftIcon
+  Clock, Star, ThumbsUp, Gift, Megaphone, FileDown, Gift as GiftIcon, Lock, Mail, LogIn, UserPlus
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { 
   getAuth, 
   signInAnonymously, 
   signInWithCustomToken,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut,
   onAuthStateChanged 
 } from 'firebase/auth';
 import { 
@@ -48,14 +51,12 @@ const useAuth = () => {
 
   useEffect(() => {
     const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
+      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+        try {
+            await signInWithCustomToken(auth, __initial_auth_token);
+        } catch (e) {
+            console.error("Token sign-in failed", e);
         }
-      } catch (error) {
-        console.error("Auth Error:", error);
       }
     };
     initAuth();
@@ -240,7 +241,7 @@ const checkRenewalAlert = (contractEndDate) => {
 };
 
 // ------------------------------------------
-// モックデータ生成関数 (必ずAppより前に定義)
+// モックデータ生成関数
 // ------------------------------------------
 
 const generateMockData = () => {
@@ -480,7 +481,7 @@ const ConfirmModal = ({ isOpen, title, message, onConfirm, onCancel, confirmText
   );
 };
 
-// スケジュール入力用モーダル
+// スケジュール入力用モーダル (定義位置をDashboardContentの前に移動)
 const ScheduleModal = ({ isOpen, onClose, onSave, talents }) => {
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
@@ -560,8 +561,155 @@ const ScheduleModal = ({ isOpen, onClose, onSave, talents }) => {
   );
 };
 
+// ログインコンポーネント (修正版: バリデーション改善 + エラーハンドリング強化)
+const Login = ({ onLogin, onRegister, initialMode = 'login' }) => {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isRegisterMode, setIsRegisterMode] = useState(initialMode === 'register');
 
-const Sidebar = ({ activeTab, setActiveTab, onGenerateMock }) => {
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setIsLoggingIn(true);
+    setError('');
+
+    // バリデーション: 入力チェック（空白除去）
+    if (!email.trim() || !password.trim()) {
+        setError("メールアドレスとパスワードを入力してください。");
+        setIsLoggingIn(false);
+        return;
+    }
+
+    try {
+       if (isRegisterMode) {
+         await onRegister(email, password);
+       } else {
+         await onLogin(email, password, 'email');
+       }
+    } catch (err) {
+      console.error("Auth Error:", err);
+      // Firebase auth/operation-not-allowed エラー（設定未完了）への対策
+      if (err.code === 'auth/operation-not-allowed') {
+        setError(
+          <div className="text-left">
+            <span className="block font-bold mb-1">認証設定エラー</span>
+            <span className="block text-xs mb-3">Firebaseコンソールで「メール/パスワード認証」が有効になっていません。</span>
+            <button 
+                type="button" 
+                onClick={() => onLogin('', '', 'demo')}
+                className="w-full py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 transition-colors"
+            >
+                今すぐデモモードで試す (データ保存なし)
+            </button>
+          </div>
+        );
+      } else if (err.code === 'auth/email-already-in-use') {
+        setError('このメールアドレスは既に使用されています。');
+      } else if (err.code === 'auth/weak-password') {
+        setError('パスワードは6文字以上で設定してください。');
+      } else if (err.code === 'auth/invalid-email') {
+        setError('メールアドレスの形式が正しくありません。');
+      } else if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        setError('メールアドレスまたはパスワードが間違っています。');
+      } else {
+        setError(isRegisterMode ? `アカウント登録に失敗しました。(${err.code})` : `ログインに失敗しました。(${err.code})`);
+      }
+    } finally {
+      if (error && error.type !== 'div') { // エラーがJSX要素でない場合のみフラグを下ろす（デモモードボタン表示時はローディング維持しない）
+          setIsLoggingIn(false);
+      } else if (!error) {
+          setIsLoggingIn(false);
+      }
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+      <div className="bg-white p-10 rounded-[32px] shadow-xl w-full max-w-md border border-slate-100">
+        <div className="text-center mb-10">
+           <div className="w-16 h-16 bg-gradient-to-tr from-indigo-600 to-violet-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-indigo-200 mx-auto mb-4">
+               <Award size={32} />
+           </div>
+           <h1 className="text-2xl font-extrabold text-slate-800">TalentPro</h1>
+           <p className="text-slate-400 font-bold text-sm uppercase tracking-widest mt-1">Management System</p>
+           <h2 className="text-lg font-bold text-slate-600 mt-4">{isRegisterMode ? '新規アカウント作成' : 'ログイン'}</h2>
+        </div>
+
+        {error && (
+            <div className="mb-6 p-4 bg-red-50 border border-red-100 text-red-500 text-sm rounded-xl font-bold flex items-start text-left">
+                {typeof error === 'string' ? (
+                    <>
+                        <AlertTriangle size={18} className="mr-2 mt-0.5 shrink-0"/>
+                        <div>{error}</div>
+                    </>
+                ) : error}
+            </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-5">
+            <InputField 
+                label="Email Address" 
+                type="email" 
+                name="email" 
+                value={email} 
+                onChange={(e) => setEmail(e.target.value)} 
+                placeholder="name@company.com"
+                autoComplete="email" 
+            />
+            <InputField 
+                label="Password" 
+                type="password" 
+                name="password" 
+                value={password} 
+                onChange={(e) => setPassword(e.target.value)} 
+                placeholder="••••••••"
+                autoComplete={isRegisterMode ? "new-password" : "current-password"} 
+            />
+            
+            <button 
+                type="submit"
+                disabled={isLoggingIn}
+                className="w-full py-4 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-900 transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+            >
+               {isLoggingIn ? <RefreshCw className="animate-spin mr-2" size={18}/> : (isRegisterMode ? <UserCheck className="mr-2" size={18}/> : <LogOut className="mr-2 rotate-180" size={18}/>)}
+               {isRegisterMode ? 'アカウント作成' : 'ログイン'}
+            </button>
+        </form>
+
+        <div className="mt-4 text-center">
+            <button 
+                type="button"
+                onClick={() => { setIsRegisterMode(!isRegisterMode); setError(''); }}
+                className="text-sm text-indigo-600 hover:text-indigo-800 font-bold"
+            >
+                {isRegisterMode ? 'すでにアカウントをお持ちの方はこちら' : '新規アカウント登録はこちら'}
+            </button>
+        </div>
+
+        {/* デモモードボタン (初期状態でも表示) */}
+        {!isRegisterMode && (
+            <div className="mt-8 pt-8 border-t border-slate-100 flex flex-col gap-3">
+                 <button 
+                    type="button"
+                    onClick={(e) => onLogin('', '', 'demo')} 
+                    className="w-full py-3 bg-emerald-50 text-emerald-600 rounded-xl font-bold hover:bg-emerald-100 transition-all border border-emerald-100 flex items-center justify-center text-sm"
+                >
+                   <Database className="mr-2" size={16}/>
+                   デモモードで試す (データ保存なし)
+                </button>
+                <p className="text-xs text-center text-slate-400">
+                    ※デモモードではFirebaseを使用せず、ブラウザ上のみで動作します。リロードするとデータは消えます。
+                </p>
+            </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+
+const Sidebar = ({ activeTab, setActiveTab, onGenerateMock, user, isDemoMode, onLogout, onGoToRegister, onGoToLogin }) => {
   const menuItems = [
     { id: 'dashboard', label: 'ダッシュボード', icon: LayoutDashboard },
     { id: 'sales', label: '売上分析', icon: BarChart3 },
@@ -624,22 +772,55 @@ const Sidebar = ({ activeTab, setActiveTab, onGenerateMock }) => {
          </button>
         <div className="bg-slate-900 rounded-2xl p-4 text-white relative overflow-hidden shadow-xl shadow-slate-400/20">
             <div className="absolute top-0 right-0 -mt-2 -mr-2 w-20 h-20 bg-white/10 rounded-full blur-xl"></div>
-            <p className="text-xs text-slate-400 font-bold mb-1">ログインユーザー</p>
-            <div className="flex items-center space-x-3">
+            
+             <div className="flex items-center space-x-3 mb-4">
                 <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-400 to-cyan-400 border-2 border-slate-800"></div>
-                <div>
-                    <p className="text-sm font-bold">Admin User</p>
-                    <p className="text-[10px] text-slate-400">michelle-ent.co.jp</p>
+                <div className="overflow-hidden">
+                    <p className="text-sm font-bold truncate">{isDemoMode ? 'ゲスト(デモ)' : 'User'}</p>
+                    <p className="text-[10px] text-slate-400 truncate w-32">{user?.email || 'demo@example.com'}</p>
                 </div>
             </div>
-            <button className="mt-4 w-full py-2 bg-white/10 hover:bg-white/20 rounded-lg text-xs font-bold transition-colors">
-                ログアウト
-            </button>
+
+            <div className="space-y-2">
+                {isDemoMode ? (
+                   <>
+                     <button 
+                        onClick={onGoToLogin}
+                        className="w-full py-2 bg-white/10 hover:bg-white/20 rounded-lg text-xs font-bold transition-colors flex items-center justify-center"
+                    >
+                        <LogIn size={14} className="mr-2"/> ログイン
+                    </button>
+                    <button 
+                        onClick={onGoToRegister}
+                        className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-xs font-bold transition-colors flex items-center justify-center text-white"
+                    >
+                        <UserPlus size={14} className="mr-2"/> 新規登録
+                    </button>
+                   </>
+                ) : (
+                   <>
+                     <button 
+                        onClick={onGoToRegister}
+                        className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-xs font-bold transition-colors flex items-center justify-center text-white"
+                    >
+                        <UserPlus size={14} className="mr-2"/> 新規登録
+                    </button>
+                    <button 
+                        onClick={onLogout}
+                        className="w-full py-2 bg-white/10 hover:bg-white/20 rounded-lg text-xs font-bold transition-colors flex items-center justify-center"
+                    >
+                        <LogOut size={14} className="mr-2"/> ログアウト
+                    </button>
+                   </>
+                )}
+            </div>
         </div>
       </div>
     </div>
   );
 };
+
+// ... DashboardContent, SalesAnalysisContent, TalentEvaluationsContent, LessonsContent, TalentListContent, TalentForm (省略なし)
 
 // 4. ダッシュボードコンテンツ (大幅改修)
 const DashboardContent = ({ talents, companySalesData, events, onAddEvent }) => {
@@ -661,12 +842,10 @@ const DashboardContent = ({ talents, companySalesData, events, onAddEvent }) => 
 
   // 売上トップ10 (名前で重複排除)
   const topTalents = useMemo(() => {
-      // まず売上で降順ソート
       const sorted = [...talents]
         .filter(t => t.status === 'active')
         .sort((a, b) => b.sales - a.sales);
       
-      // 名前でユニーク化 (同名の場合は売上が高い方を優先=先にソートされているので最初のもの)
       const unique = [];
       const names = new Set();
       
@@ -685,7 +864,6 @@ const DashboardContent = ({ talents, companySalesData, events, onAddEvent }) => 
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       
-      // eventsが未定義の場合のガード
       if (!events) return [];
 
       return events
@@ -733,7 +911,7 @@ const DashboardContent = ({ talents, companySalesData, events, onAddEvent }) => 
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
-        {/* 6. 売上トップ10 (誕生日削除に伴い幅を拡張) */}
+        {/* 6. 売上トップ10 */}
         <div className="lg:col-span-3 bg-white p-0 rounded-[32px] shadow-sm border border-slate-100 overflow-hidden flex flex-col h-[500px]">
           <div className="p-6 border-b border-slate-50 bg-gradient-to-b from-white to-slate-50/50">
             <h3 className="text-lg font-bold text-slate-800 flex items-center">
@@ -887,11 +1065,13 @@ const SalesAnalysisContent = ({ talents, companySalesData, onImportTalentSales, 
         '10月', '11月', '12月', '1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月'
       ];
       
+      // ヘッダー行を検索 (最初の30行以内)
       for(let i=0; i<Math.min(rows.length, 30); i++) {
           const rowStr = rows[i].join(',').toLowerCase();
+          // 月名または「売上高」を含む行を探す
           const matchCount = monthKeywords.filter(k => rowStr.includes(k.toLowerCase())).length;
           
-          if (matchCount >= 3) {
+          if (matchCount >= 3) { // 3つ以上月名が含まれていればヘッダーとみなす
               headerIndex = i;
               break;
           }
@@ -912,7 +1092,11 @@ const SalesAnalysisContent = ({ talents, companySalesData, onImportTalentSales, 
       });
 
       let salesRow = null;
+      // 売上データの行を探す（「売上高」または「売上高 計」など）
+      // ヘッダー行より下を検索
       salesRow = rows.find((row, i) => i > headerIndex && row[0] && (row[0].trim() === '売上高' || row[0].trim() === '売上高 計'));
+      
+      // 見つからない場合、より緩い条件で探す（「売上」を含み、「総利益」「原価」を含まない）
       if (!salesRow) {
          salesRow = rows.find((row, i) => i > headerIndex && row[0] && row[0].includes('売上') && !row[0].includes('総利益') && !row[0].includes('原価'));
       }
@@ -961,6 +1145,7 @@ const SalesAnalysisContent = ({ talents, companySalesData, onImportTalentSales, 
         }
 
         let headerIndex = -1;
+        // 「10月」と「11月」が含まれる行をヘッダーとする
         for(let i=0; i<rows.length; i++) {
             if(rows[i].some(c => c && c.includes('10月')) && rows[i].some(c => c && c.includes('11月'))) {
                 headerIndex = i;
@@ -1190,7 +1375,6 @@ const SalesAnalysisContent = ({ talents, companySalesData, onImportTalentSales, 
                     <td className={`px-6 py-4 ${rankStyle}`}>{rankIcon}</td>
                     <td className="px-6 py-4">
                         <div className="font-bold text-slate-700 text-base group-hover:text-indigo-600 transition-colors">{talent.name}</div>
-                        {/* 削除: {talent.specialty && <div className="text-xs text-slate-400 mt-1 font-medium bg-slate-100 inline-block px-2 py-0.5 rounded">{talent.specialty}</div>} */}
                     </td>
                     <td className="px-6 py-4 font-bold text-emerald-600 text-base">{talent.sales.toLocaleString()} <span className="text-[10px] text-slate-400 font-normal">円</span></td>
                     <td className="px-6 py-4 text-right font-medium text-slate-500">{averageSales.toLocaleString()} <span className="text-[10px] text-slate-400 font-normal">円</span></td>
@@ -1726,6 +1910,7 @@ const TalentListContent = ({ talents, onSelect, onAddNew, onImport }) => {
     fileInputRef.current.click();
   };
 
+  // importData関数 (定義順序を変更し、handleFileChange内で使えるように)
   const importData = (rows, headerIndex, onImportCallback) => {
     const headers = rows[headerIndex];
     const dataRows = rows.slice(headerIndex + 1);
@@ -2021,6 +2206,299 @@ const TalentListContent = ({ talents, onSelect, onAddNew, onImport }) => {
   );
 };
 
+// 5. タレント詳細・編集フォーム (定義位置を移動)
+const TalentForm = ({ talent, onSave, onBack, onDelete, onRetire }) => {
+  const [formData, setFormData] = useState({ ...talent });
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [retireModalOpen, setRetireModalOpen] = useState(false);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    let updates = { [name]: value };
+    
+    if (name === 'birthDate') {
+      updates.age = calculateAge(value);
+    }
+
+    setFormData(prev => ({ ...prev, ...updates }));
+  };
+
+  const fileInputRef = useRef(null);
+  const handlePhotoUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setFormData(prev => ({ ...prev, photo: reader.result }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const isRenewalNeeded = checkRenewalAlert(formData.contractEndDate);
+
+  return (
+    <div className="animate-in slide-in-from-right-8 duration-300">
+      {/* Header Actions */}
+      <div className="flex items-center justify-between mb-8 sticky top-0 bg-slate-50/90 backdrop-blur z-20 py-4 border-b border-slate-200">
+        <div className="flex items-center space-x-4">
+          <button onClick={onBack} className="p-3 hover:bg-slate-200 rounded-full transition-colors text-slate-500">
+            <ChevronRight className="rotate-180" size={20} />
+          </button>
+          <div>
+              <h2 className="text-2xl font-extrabold text-slate-800 tracking-tight">
+                {formData.id ? 'プロフィール編集' : '新規タレント登録'}
+              </h2>
+              <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">{formData.name || 'Draft'}</p>
+          </div>
+          {formData.status === 'retired' && (
+            <span className="px-3 py-1 bg-slate-200 text-slate-600 text-xs font-bold rounded-full">
+              RETIRED
+            </span>
+          )}
+          {isRenewalNeeded && formData.status === 'active' && (
+            <span className="px-3 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded-full flex items-center border border-amber-200">
+              <AlertTriangle size={12} className="mr-1" /> RENEWAL
+            </span>
+          )}
+        </div>
+        <div className="flex space-x-3">
+          {formData.id && formData.status === 'active' && (
+            <button 
+              onClick={() => setRetireModalOpen(true)}
+              className="px-5 py-2.5 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 transition-colors flex items-center text-sm font-bold"
+            >
+              <Archive size={16} className="mr-2" /> アーカイブ
+            </button>
+          )}
+          {formData.id && (
+            <button 
+              onClick={() => setDeleteModalOpen(true)}
+              className="px-5 py-2.5 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition-colors flex items-center text-sm font-bold"
+            >
+              <Trash2 size={16} className="mr-2" /> 削除
+            </button>
+          )}
+          <button 
+            onClick={() => onSave(formData)}
+            className="px-8 py-2.5 bg-indigo-600 text-white rounded-xl shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all flex items-center text-sm font-bold"
+          >
+            <Save size={16} className="mr-2" /> 保存
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-12 gap-8 pb-20">
+        {/* 左カラム：写真・基本情報サマリ */}
+        <div className="col-span-12 lg:col-span-4 space-y-6">
+          <div className="bg-white p-8 rounded-[32px] shadow-sm border border-slate-100 text-center relative overflow-hidden">
+             <div className="absolute top-0 left-0 w-full h-32 bg-gradient-to-br from-indigo-50 to-slate-50 z-0"></div>
+            <div className="relative z-10">
+                <div className="relative w-48 h-48 mx-auto mb-6 group">
+                <div className="w-full h-full rounded-full overflow-hidden bg-white border-4 border-white shadow-xl">
+                    {formData.photo ? (
+                    <img src={formData.photo} alt="profile" className="w-full h-full object-cover" />
+                    ) : (
+                    <div className="w-full h-full flex items-center justify-center text-slate-300 bg-slate-100"><UserX size={64} /></div>
+                    )}
+                </div>
+                <button 
+                    onClick={() => fileInputRef.current.click()}
+                    className="absolute bottom-2 right-2 p-3.5 bg-indigo-600 text-white rounded-full shadow-lg hover:bg-indigo-700 transition-transform hover:scale-110 border-4 border-white"
+                >
+                    <Camera size={20} />
+                </button>
+                <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handlePhotoUpload} />
+                </div>
+                
+                <h3 className="text-2xl font-extrabold text-slate-800 tracking-tight">{formData.name || 'No Name'}</h3>
+                <p className="text-slate-500 text-sm mb-6 font-medium">{formData.gender ? `(${formData.gender})` : ''} {formData.education}</p>
+                
+                {/* 評価セクション */}
+                <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100 mb-6">
+                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center justify-center">
+                        <Award size={14} className="mr-1 text-amber-500"/> 評価・査定
+                    </h4>
+                    <div className="flex justify-center space-x-2 mb-6">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                            <button 
+                            key={star} 
+                            type="button"
+                            onClick={() => setFormData({...formData, rating: star})}
+                            className={`transition-all hover:scale-125 ${star <= formData.rating ? 'text-amber-400 fill-amber-400' : 'text-slate-200'}`}
+                            >
+                            <Star size={32} />
+                            </button>
+                        ))}
+                    </div>
+                    <TextAreaField 
+                        label="管理者コメント" 
+                        name="evaluationNote"
+                        value={formData.evaluationNote || ''} 
+                        onChange={handleChange} 
+                        placeholder="タレントの評価や特記事項を入力..." 
+                        rows={4}
+                        className="text-left"
+                    />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 text-left">
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Age</span>
+                        <span className="font-extrabold text-slate-700 text-lg">{formData.age}<span className="text-xs font-normal ml-1">歳</span></span>
+                    </div>
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Height</span>
+                        <span className="font-extrabold text-slate-700 text-lg">{formData.height}<span className="text-xs font-normal ml-1">cm</span></span>
+                    </div>
+                </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 右カラム：詳細入力フォーム */}
+        <div className="col-span-12 lg:col-span-8 space-y-8">
+          
+          {/* 1. 基本属性 */}
+          <section className="bg-white p-8 rounded-[32px] shadow-sm border border-slate-100">
+            <h4 className="text-lg font-bold text-slate-800 mb-6 flex items-center">
+                <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center mr-3">
+                    <UserCheck size={18}/>
+                </div>
+                基本情報
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <InputField label="芸名" name="name" value={formData.name} onChange={handleChange} required />
+              <SelectField label="性別" name="gender" value={formData.gender} onChange={handleChange} options={["男", "女", "その他", "回答しない"]} />
+              <InputField label="芸名フリガナ" name="kana" value={formData.kana} onChange={handleChange} />
+              <InputField label="本名" name="realName" value={formData.realName} onChange={handleChange} />
+              <InputField label="生年月日" type="date" name="birthDate" value={formData.birthDate} onChange={handleChange} />
+              <InputField label="出身地" name="birthPlace" value={formData.birthPlace} onChange={handleChange} />
+              <InputField label="最終学歴" name="education" value={formData.education} onChange={handleChange} />
+              <InputField label="契約日 (開始)" type="date" name="contractDate" value={formData.contractDate} onChange={handleChange} />
+              <InputField label="契約終了日" type="date" name="contractEndDate" value={formData.contractEndDate} onChange={handleChange} className={isRenewalNeeded ? "border-amber-500 bg-amber-50" : ""} />
+            </div>
+          </section>
+
+          {/* 2. 連絡先・住所 */}
+          <section className="bg-white p-8 rounded-[32px] shadow-sm border border-slate-100">
+             <h4 className="text-lg font-bold text-slate-800 mb-6 flex items-center">
+                <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center mr-3">
+                    <MapPin size={18}/> 
+                </div>
+                連絡先・居住地
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <InputField label="携帯電話" name="mobile" value={formData.mobile} onChange={handleChange} />
+              <InputField label="メールアドレス" type="email" name="email" value={formData.email} onChange={handleChange} />
+              <InputField label="緊急連絡先" name="emergencyContact" value={formData.emergencyContact} onChange={handleChange} />
+              <InputField label="扶養家族" name="dependents" value={formData.dependents} onChange={handleChange} />
+              <InputField label="郵便番号" name="zipCode" value={formData.zipCode} onChange={handleChange} />
+              <InputField label="最寄駅" name="nearestStation" value={formData.nearestStation} onChange={handleChange} />
+              <InputField label="住所" name="address" value={formData.address} onChange={handleChange} className="md:col-span-2" />
+              <InputField label="SNSアカウント" name="sns" value={formData.sns} onChange={handleChange} placeholder="@twitter, @instagram" className="md:col-span-2" />
+            </div>
+          </section>
+
+          {/* 3. 身体データ */}
+          <section className="bg-white p-8 rounded-[32px] shadow-sm border border-slate-100">
+            <h4 className="text-lg font-bold text-slate-800 mb-6 flex items-center">
+                <div className="w-8 h-8 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center mr-3">
+                    <Settings size={18}/>
+                </div>
+                身体データ・特徴
+            </h4>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+              <InputField label="身長 (cm)" type="number" name="height" value={formData.height} onChange={handleChange} />
+              <InputField label="体重 (kg)" type="number" name="weight" value={formData.weight} onChange={handleChange} />
+              <InputField label="B (cm)" type="number" name="bust" value={formData.bust} onChange={handleChange} />
+              <InputField label="W (cm)" type="number" name="waist" value={formData.waist} onChange={handleChange} />
+              <InputField label="H (cm)" type="number" name="hip" value={formData.hip} onChange={handleChange} />
+              <InputField label="靴 (cm)" type="number" name="shoeSize" value={formData.shoeSize} onChange={handleChange} />
+              <InputField label="利き手" name="handedness" value={formData.handedness} onChange={handleChange} />
+              <SelectField label="タトゥー" name="tattoos" value={formData.tattoos} onChange={handleChange} options={["有", "無"]} />
+              <SelectField label="ピアス穴" name="piercings" value={formData.piercings} onChange={handleChange} options={["有", "無"]} />
+              <SelectField label="アレルギー" name="allergies" value={formData.allergies} onChange={handleChange} options={["有", "無"]} className="md:col-span-2" />
+              <SelectField label="喫煙" name="smoking" value={formData.smoking} onChange={handleChange} options={["有", "無"]} />
+              <SelectField label="飲酒" name="alcohol" value={formData.alcohol} onChange={handleChange} options={["有", "無", "嗜む程度"]} />
+              <InputField label="パスポート期限" name="passportExpiry" value={formData.passportExpiry} onChange={handleChange} className="md:col-span-2" placeholder="YYYY-MM-DD" />
+              <SelectField label="運転免許" name="license" value={formData.license} onChange={handleChange} options={["有", "無"]} className="md:col-span-2" />
+            </div>
+          </section>
+
+          {/* 4. スキル・芸歴 */}
+          <section className="bg-white p-8 rounded-[32px] shadow-sm border border-slate-100">
+            <h4 className="text-lg font-bold text-slate-800 mb-6 flex items-center">
+                <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center mr-3">
+                    <Award size={18}/>
+                </div>
+                スキル・経験
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <InputField label="特技・資格 (概要)" name="specialty" value={formData.specialty} onChange={handleChange} />
+              <InputField label="特技詳細" name="specialtyDetail" value={formData.specialtyDetail} onChange={handleChange} />
+              <InputField label="ダンス歴" name="dance" value={formData.dance} onChange={handleChange} />
+              <InputField label="アクション" name="action" value={formData.action} onChange={handleChange} />
+              <InputField label="殺陣" name="swordFight" value={formData.swordFight} onChange={handleChange} />
+              <InputField label="語学力" name="languages" value={formData.languages} onChange={handleChange} />
+              <InputField label="スポーツ" name="sports" value={formData.sports} onChange={handleChange} />
+              <InputField label="歌唱力" name="singing" value={formData.singing} onChange={handleChange} />
+              <InputField label="楽器・音楽" name="music" value={formData.music} onChange={handleChange} />
+            </div>
+          </section>
+
+           {/* 5. 銀行口座 (復活) */}
+           <section className="bg-white p-8 rounded-[32px] shadow-sm border border-slate-100">
+            <h4 className="text-lg font-bold text-slate-800 mb-6 flex items-center">
+                <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center mr-3">
+                    <CreditCard size={18}/>
+                </div>
+                口座情報
+            </h4>
+             <div className="grid grid-cols-1 gap-6">
+                <InputField label="銀行口座情報" name="bankInfo" value={formData.bankInfo} onChange={handleChange} placeholder="銀行名 / 支店名 / 口座番号 / 名義" />
+             </div>
+          </section>
+
+           {/* 6. 特記事項・備考 (NEW) */}
+           <section className="bg-white p-8 rounded-[32px] shadow-sm border border-slate-100">
+            <h4 className="text-lg font-bold text-slate-800 mb-6 flex items-center">
+                <div className="w-8 h-8 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center mr-3">
+                    <MessageSquare size={18}/>
+                </div>
+                備考・メモ
+            </h4>
+             <div className="grid grid-cols-1 gap-6">
+                <TextAreaField label="特記事項" name="specialNotes" value={formData.specialNotes} onChange={handleChange} placeholder="重要な注意事項など" rows={3} />
+                <TextAreaField label="備考" name="notes" value={formData.notes} onChange={handleChange} placeholder="その他メモ" rows={3} />
+             </div>
+          </section>
+
+        </div>
+      </div>
+
+      <ConfirmModal
+        isOpen={deleteModalOpen}
+        title="タレント削除"
+        message={`本当に「${formData.name}」のデータを削除しますか？この操作は元に戻せません。`}
+        onConfirm={() => { onDelete(formData.id); setDeleteModalOpen(false); }}
+        onCancel={() => setDeleteModalOpen(false)}
+        confirmText="削除する"
+      />
+      
+      <ConfirmModal
+        isOpen={retireModalOpen}
+        title="退所処理"
+        message={`「${formData.name}」を退所（アーカイブ）扱いへ移動します。データは保持されます。よろしいですか？`}
+        onConfirm={() => { onRetire(formData.id); setRetireModalOpen(false); }}
+        onCancel={() => setRetireModalOpen(false)}
+        confirmText="退所処理実行"
+        confirmColor="bg-indigo-600"
+      />
+    </div>
+  );
+};
+
 
 /**
  * ------------------------------------------------------------------
@@ -2033,6 +2511,10 @@ const App = () => {
   const [lessons, setLessons] = useState(generateMockLessons()); // レッスン用State
   const [selectedTalent, setSelectedTalent] = useState(null); 
   const [isEditing, setIsEditing] = useState(false);
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [isDemoMode, setIsDemoMode] = useState(false); // デモモード管理
+  const [authMode, setAuthMode] = useState('login'); // ログイン/新規登録モード管理
 
   // 全社売上（月次）のステート
   const [companySalesData, setCompanySalesData] = useState({
@@ -2043,111 +2525,303 @@ const App = () => {
   // イベント用ステート（追加）
   const [events, setEvents] = useState(generateMockEvents());
 
-  // レッスン追加処理
-  const handleAddLesson = (newLesson) => {
-      setLessons(prev => [...prev, newLesson]);
-  };
+  // Auth
+  useEffect(() => {
+    const initAuth = async () => {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+            try {
+                await signInWithCustomToken(auth, __initial_auth_token);
+            } catch(e) { console.error(e); }
+        }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+        setUser(u);
+        setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
 
-  // レッスン削除処理
-  const handleDeleteLesson = (id) => {
-      setLessons(prev => prev.filter(l => l.id !== id));
-  };
-
-  // 評価更新処理（新規追加）
-  const handleUpdateEvaluation = (id, newEvaluation) => {
-      setTalents(prev => prev.map(t => 
-          t.id === id ? { ...t, ...newEvaluation } : t
-      ));
-  };
-  
-  // 評価インポート処理 (NEW)
-  const handleImportEvaluations = (importedData) => {
-    setTalents(prev => {
-        return prev.map(t => {
-            // IDまたは名前でマッチング
-            const match = importedData.find(d => d.id === t.id || d.name === t.name);
-            if (match) {
-                return {
-                    ...t,
-                    rating: match.rating,
-                    evaluation: match.evaluation,
-                    evaluationNote: match.evaluationNote
-                };
-            }
-            return t;
+  // Data Sync
+  useEffect(() => {
+    // デモモードまたは未ログイン時はFirebase同期しない
+    if (!user || isDemoMode) return;
+    
+    const unsubTalents = onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'talents'), (snap) => {
+        const data = snap.docs.map(d => d.data());
+        if(data.length > 0) setTalents(data);
+        else setTalents(generateMockData()); // 初期データとしてモックを使用（初回のみ）
+    });
+    const unsubLessons = onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'lessons'), (snap) => {
+        const data = snap.docs.map(d => d.data());
+        if(data.length > 0) setLessons(data);
+        else setLessons(generateMockLessons());
+    });
+    const unsubEvents = onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'events'), (snap) => {
+        const data = snap.docs.map(d => d.data());
+        if(data.length > 0) setEvents(data);
+        else setEvents(generateMockEvents());
+    });
+    const unsubSales = onSnapshot(doc(db, 'artifacts', appId, 'users', user.uid, 'sales', 'company'), (snap) => {
+        if(snap.exists()) setCompanySalesData(snap.data());
+        else setCompanySalesData({
+            current: [1000000, 1200000, 1100000, 1300000, 1400000, 1500000, 1600000, 1500000, 1400000, 1300000, 1200000, 1100000],
+            previous: [900000, 1000000, 950000, 1100000, 1200000, 1300000, 1400000, 1300000, 1200000, 1100000, 1000000, 900000]
         });
     });
-    alert(`${importedData.length}件の評価データをインポートしました。`);
+    
+    return () => {
+        unsubTalents();
+        unsubLessons();
+        unsubEvents();
+        unsubSales();
+    };
+  }, [user, isDemoMode]);
+
+  // Firestore Helpers
+  const saveToFirestore = async (colName, data, id) => {
+      if(!user || isDemoMode) return; // デモモードなら何もしない
+      await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, colName, id), data);
+  };
+  const deleteFromFirestore = async (colName, id) => {
+      if(!user || isDemoMode) return; // デモモードなら何もしない
+      await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, colName, id));
   };
 
-  // イベント追加処理 (NEW)
-  const handleAddEvent = (newEvent) => {
-      setEvents(prev => [...prev, { ...newEvent, id: generateId() }]);
+  // Handlers
+  const handleLogin = async (email, password, type) => {
+      if (type === 'demo') {
+          setIsDemoMode(true);
+          setUser({ uid: 'demo-user', email: 'demo@example.com' }); // ダミーユーザー
+          setLoading(false);
+          // デモデータの初期化
+          setTalents(generateMockData());
+          setLessons(generateMockLessons());
+          setEvents(generateMockEvents());
+          setCompanySalesData({
+              current: [1000000, 1200000, 1100000, 1300000, 1400000, 1500000, 1600000, 1500000, 1400000, 1300000, 1200000, 1100000],
+              previous: [900000, 1000000, 950000, 1100000, 1200000, 1300000, 1400000, 1300000, 1200000, 1100000, 1000000, 900000]
+          });
+          return;
+      }
+
+      if (type === 'guest') await signInAnonymously(auth);
+      else await signInWithEmailAndPassword(auth, email, password);
   };
-
-
-  // ... (Other handlers: handleSaveTalent, handleDeleteTalent, etc.)
   
-  // 以下、既存のハンドラ定義 (再掲または省略されていた部分を補完)
-  const handleSaveTalent = (updatedTalent) => {
-    if (updatedTalent.id) {
-      setTalents(prev => prev.map(t => t.id === updatedTalent.id ? updatedTalent : t));
+  const handleRegister = async (email, password) => {
+      await createUserWithEmailAndPassword(auth, email, password);
+  };
+
+  const handleLogout = async () => {
+      setAuthMode('login'); // デフォルトはログインモードに戻す
+      setIsDemoMode(false);
+      await signOut(auth);
+      setTalents([]);
+      setLessons([]);
+      setEvents([]);
+  };
+
+  const handleGoToRegister = async () => {
+      setAuthMode('register');
+      setIsDemoMode(false);
+      if(user) await signOut(auth);
+      setUser(null);
+  };
+  
+  const handleGoToLogin = async () => {
+      setAuthMode('login');
+      setIsDemoMode(false);
+      if(user) await signOut(auth);
+      setUser(null);
+  };
+
+
+  // --- Data Manipulation Handlers (Branching logic for Demo Mode) ---
+
+  const handleAddLesson = (newLesson) => {
+      if (isDemoMode) {
+          setLessons(prev => [...prev, newLesson]);
+      } else {
+          saveToFirestore('lessons', newLesson, newLesson.id);
+      }
+  };
+
+  const handleDeleteLesson = (id) => {
+      if (isDemoMode) {
+          setLessons(prev => prev.filter(l => l.id !== id));
+      } else {
+          deleteFromFirestore('lessons', id);
+      }
+  };
+
+  const handleAddEvent = (newEvent) => {
+      const eventWithId = { ...newEvent, id: generateId() };
+      if (isDemoMode) {
+          setEvents(prev => [...prev, eventWithId]);
+      } else {
+          saveToFirestore('events', eventWithId, eventWithId.id);
+      }
+  };
+
+  const handleUpdateEvaluation = (id, updates) => {
+      if (isDemoMode) {
+          setTalents(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
+      } else {
+          const t = talents.find(x => x.id === id);
+          if(t) saveToFirestore('talents', { ...t, ...updates }, id);
+      }
+  };
+  
+  const handleImportEvaluations = (importedData) => {
+    if (isDemoMode) {
+        setTalents(prev => prev.map(t => {
+            const match = importedData.find(d => d.id === t.id || d.name === t.name);
+            return match ? { ...t, ...match } : t;
+        }));
+        alert(`${importedData.length}件の評価データをインポートしました（デモモード）。`);
     } else {
-      const newTalent = { ...updatedTalent, id: generateId(), status: 'active', sales: 0 };
-      setTalents(prev => [newTalent, ...prev]);
+        if(!user) return;
+        const batch = writeBatch(db);
+        importedData.forEach(item => {
+            const talent = talents.find(t => t.id === item.id || t.name === item.name);
+            if (talent) {
+                const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'talents', talent.id);
+                batch.update(docRef, {
+                    rating: item.rating,
+                    evaluation: item.evaluation,
+                    evaluationNote: item.evaluationNote
+                });
+            }
+        });
+        batch.commit().then(() => alert(`${importedData.length}件の評価データをインポートしました。`));
+    }
+  };
+  
+  const handleSaveTalent = (updatedTalent) => {
+    let talentToSave = updatedTalent;
+    if (!talentToSave.id) {
+        talentToSave = { ...updatedTalent, id: generateId(), status: 'active', sales: 0 };
+    }
+
+    if (isDemoMode) {
+        setTalents(prev => {
+            const index = prev.findIndex(t => t.id === talentToSave.id);
+            if (index > -1) {
+                const newTalents = [...prev];
+                newTalents[index] = talentToSave;
+                return newTalents;
+            } else {
+                return [talentToSave, ...prev];
+            }
+        });
+    } else {
+        saveToFirestore('talents', talentToSave, talentToSave.id);
     }
     setIsEditing(false);
     setSelectedTalent(null);
   };
 
   const handleDeleteTalent = (id) => {
-    setTalents(prev => prev.filter(t => t.id !== id));
+    if (isDemoMode) {
+        setTalents(prev => prev.filter(t => t.id !== id));
+    } else {
+        deleteFromFirestore('talents', id);
+    }
     setIsEditing(false);
     setSelectedTalent(null);
   };
 
   const handleRetireTalent = (id) => {
-    setTalents(prev => prev.map(t => t.id === id ? { ...t, status: 'retired' } : t));
+    if (isDemoMode) {
+        setTalents(prev => prev.map(t => t.id === id ? { ...t, status: 'retired' } : t));
+    } else {
+        const talent = talents.find(t => t.id === id);
+        if(talent) saveToFirestore('talents', { ...talent, status: 'retired' }, id);
+    }
     setIsEditing(false);
     setSelectedTalent(null);
   };
 
   const handleImport = (newTalents) => {
-    const initialized = newTalents.map((t, i) => ({ ...t, id: generateId() }));
-    setTalents(prev => [...initialized, ...prev]);
+    if (isDemoMode) {
+        const initialized = newTalents.map(t => ({ ...t, id: t.id || generateId() }));
+        setTalents(prev => [...initialized, ...prev]);
+        alert(`${newTalents.length}件のデータをインポートしました（デモモード）。`);
+    } else {
+        if (!user) return;
+        const batch = writeBatch(db);
+        newTalents.forEach(t => {
+            const id = t.id || generateId();
+            const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'talents', id);
+            batch.set(docRef, { ...t, id });
+        });
+        batch.commit().then(() => alert(`${newTalents.length}件のタレントデータをインポートしました。`));
+    }
   };
 
   const handleImportTalentSales = (salesData) => {
-     // ... (Previous logic)
-     setTalents(prev => {
-      const updatedTalents = prev.map(talent => {
-        const salesInfo = salesData.find(s => s.name === talent.name || talent.name.includes(s.name) || s.name.includes(talent.name));
-        if (salesInfo) return { ...talent, sales: salesInfo.totalSales, monthlySales: salesInfo.monthlySales, averageSales: salesInfo.averageSales };
-        return talent;
-      });
-      const newTalents = salesData.filter(s => !updatedTalents.some(t => t.name === s.name || t.name.includes(s.name) || s.name.includes(t.name))).map((s, index) => ({
-        id: generateId(), status: 'active', name: s.name, sales: s.totalSales, monthlySales: s.monthlySales, averageSales: s.averageSales,
-        gender: '-', kana: '', realName: '', education: '', mobile: '', email: '', zipCode: '', address: '', nearestStation: '', emergencyContact: '', dependents: '', sns: '', bankInfo: '', birthDate: '', age: '-', passportExpiry: '', birthPlace: '', contractDate: '', contractEndDate: '', height: 0, weight: 0, bust: 0, waist: 0, hip: 0, shoeSize: 0, handedness: '', piercings: '', tattoos: '', allergies: '', smoking: '', alcohol: '', license: '', specialty: '', specialtyDetail: '', dance: '', action: '', swordFight: '', languages: '', sports: '', games: '', music: '', singing: '', notes: '', specialNotes: '', rating: 0,
-      }));
-      return [...updatedTalents, ...newTalents];
-    });
-    alert(`売上データを取り込みました。`);
+     if (isDemoMode) {
+         setTalents(prev => prev.map(t => {
+             const s = salesData.find(d => d.name === t.name || t.name.includes(d.name));
+             if (s) return { ...t, sales: s.totalSales, monthlySales: s.monthlySales, averageSales: s.averageSales };
+             return t;
+         }));
+         alert("売上データを反映しました（デモモード）。");
+     } else {
+         if(!user) return;
+         const batch = writeBatch(db);
+         salesData.forEach(s => {
+            const talent = talents.find(t => t.name === s.name || t.name.includes(s.name));
+            if(talent) {
+                const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'talents', talent.id);
+                batch.update(docRef, { 
+                    sales: s.totalSales, 
+                    monthlySales: s.monthlySales,
+                    averageSales: s.averageSales
+                });
+            }
+         });
+         batch.commit().then(() => alert(`売上データを取り込みました。`));
+     }
   };
 
-  const handleImportCompanySales = (totalMonthlySales, yearType) => {
-    setCompanySalesData(prev => ({ ...prev, [yearType]: totalMonthlySales }));
-    alert(`${yearType === 'current' ? '今年度' : '前年度'}の全社売上データをグラフに反映しました。`);
+  const handleImportCompanySales = (data, year) => {
+    if (isDemoMode) {
+        setCompanySalesData(prev => ({ ...prev, [year]: data }));
+        alert(`${year === 'current' ? '今年度' : '前年度'}の全社売上データを更新しました（デモモード）。`);
+    } else {
+        if(!user) return;
+        const newData = { ...companySalesData, [year]: data };
+        setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'sales', 'company'), newData)
+            .then(() => alert(`${year === 'current' ? '今年度' : '前年度'}の全社売上データを更新しました。`));
+    }
   };
   
-  // モックデータ生成用ハンドラ（サイドバーから呼び出し）
   const handleGenerateMock = () => {
-      setTalents(generateMockData());
-      setCompanySalesData({
-          current: [1000000, 1200000, 1100000, 1300000, 1400000, 1500000, 1600000, 1500000, 1400000, 1300000, 1200000, 1100000],
-          previous: [900000, 1000000, 950000, 1100000, 1200000, 1300000, 1400000, 1300000, 1200000, 1100000, 1000000, 900000]
-      });
-      alert('サンプルデータを投入しました。');
+      if (isDemoMode) {
+          setTalents(generateMockData());
+          setCompanySalesData({
+            current: [1000000, 1200000, 1100000, 1300000, 1400000, 1500000, 1600000, 1500000, 1400000, 1300000, 1200000, 1100000],
+            previous: [900000, 1000000, 950000, 1100000, 1200000, 1300000, 1400000, 1300000, 1200000, 1100000, 1000000, 900000]
+          });
+          alert('サンプルデータを投入しました（デモモード）。');
+      } else {
+          if(!user) return;
+          const batch = writeBatch(db);
+          generateMockData().forEach(t => batch.set(doc(db, 'artifacts', appId, 'users', user.uid, 'talents', t.id), t));
+          batch.set(doc(db, 'artifacts', appId, 'users', user.uid, 'sales', 'company'), {
+              current: [1000000, 1200000, 1100000, 1300000, 1400000, 1500000, 1600000, 1500000, 1400000, 1300000, 1200000, 1100000],
+              previous: [900000, 1000000, 950000, 1100000, 1200000, 1300000, 1400000, 1300000, 1200000, 1100000, 1000000, 900000]
+          });
+          batch.commit().then(() => alert('サンプルデータを投入しました。'));
+      }
   };
+
+  if (loading) return <div className="flex h-screen items-center justify-center bg-slate-50 text-slate-400">Loading...</div>;
+  
+  // ログインしていない場合はログイン画面を表示
+  if (!user) return <Login onLogin={handleLogin} onRegister={handleRegister} initialMode={authMode} />;
 
   // 画面ルーティング
   const renderContent = () => {
@@ -2155,10 +2829,10 @@ const App = () => {
       return (
         <TalentForm 
           talent={selectedTalent || {}} 
-          onSave={handleSaveTalent} // 定義済みハンドラを使用
+          onSave={handleSaveTalent} 
           onBack={() => { setSelectedTalent(null); setIsEditing(false); }}
-          onDelete={handleDeleteTalent} // 定義済みハンドラを使用
-          onRetire={handleRetireTalent} // 定義済みハンドラを使用
+          onDelete={handleDeleteTalent} 
+          onRetire={handleRetireTalent} 
         />
       );
     }
@@ -2178,16 +2852,16 @@ const App = () => {
           <SalesAnalysisContent 
             talents={talents} 
             companySalesData={companySalesData}
-            onImportTalentSales={handleImportTalentSales} // 定義済みハンドラ
-            onImportCompanySales={handleImportCompanySales} // 定義済みハンドラ
+            onImportTalentSales={handleImportTalentSales} 
+            onImportCompanySales={handleImportCompanySales} 
           />
         );
-      case 'evaluations': // 評価管理画面追加
+      case 'evaluations': 
         return (
           <TalentEvaluationsContent 
              talents={talents}
              onUpdateEvaluation={handleUpdateEvaluation}
-             onImportEvaluations={handleImportEvaluations} // ハンドラを渡す
+             onImportEvaluations={handleImportEvaluations}
           />
         );
       case 'talents':
@@ -2196,10 +2870,10 @@ const App = () => {
             talents={talents} 
             onSelect={(t) => { setSelectedTalent(t); setIsEditing(true); }}
             onAddNew={() => { setSelectedTalent({}); setIsEditing(true); }}
-            onImport={handleImport} // 定義済みハンドラ
+            onImport={handleImport} 
           />
         );
-      case 'lessons': // レッスン画面
+      case 'lessons': 
         return (
           <LessonsContent 
              talents={talents}
@@ -2221,7 +2895,16 @@ const App = () => {
 
   return (
     <div className="flex min-h-screen bg-slate-50 font-sans text-slate-600">
-      <Sidebar activeTab={activeTab} setActiveTab={(tab) => { setActiveTab(tab); setSelectedTalent(null); setIsEditing(false); }} onGenerateMock={handleGenerateMock} />
+      <Sidebar 
+        activeTab={activeTab} 
+        setActiveTab={(tab) => { setActiveTab(tab); setSelectedTalent(null); setIsEditing(false); }} 
+        onGenerateMock={handleGenerateMock}
+        user={user}
+        isDemoMode={isDemoMode}
+        onLogout={handleLogout}
+        onGoToRegister={handleGoToRegister}
+        onGoToLogin={handleGoToLogin}
+      />
       <main className="ml-72 flex-1 p-10 h-screen overflow-y-auto">
         {renderContent()}
       </main>
