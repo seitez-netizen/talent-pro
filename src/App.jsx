@@ -34,7 +34,14 @@ import {
  * ------------------------------------------------------------------
  */
 
-const firebaseConfig = JSON.parse(__firebase_config);
+const firebaseConfig = {
+  apiKey: "AIzaSyBlq0uwvZ_eg09f271637aZgBfJZGnEfPE",
+  authDomain: "michelle-talent-pro-130cb.firebaseapp.com",
+  projectId: "michelle-talent-pro-130cb",
+  storageBucket: "michelle-talent-pro-130cb.firebasestorage.app",
+  messagingSenderId: "127441580022",
+  appId: "1:127441580022:web:8866ff6e09a0126d4de1d7"
+};
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
