@@ -7,7 +7,7 @@ import {
   ArrowUpDown, Filter, RefreshCw, BarChart3, ChevronDown, History, Database,
   Clock, Star, ThumbsUp, Gift, Megaphone, FileDown, Gift as GiftIcon, Lock, Mail, LogIn, UserPlus,
   Cloud, CloudOff,
-  CalendarDays, List
+  List // CalendarDays 削除 -> CalendarIconを使用
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { 
@@ -33,7 +33,7 @@ import {
 
 /**
  * ------------------------------------------------------------------
- * 0. Error Boundary (真っ白画面防止用)
+ * 0. Error Boundary (アプリ全体のエラー捕捉用)
  * ------------------------------------------------------------------
  */
 class ErrorBoundary extends React.Component {
@@ -54,20 +54,20 @@ class ErrorBoundary extends React.Component {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
+        <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6 font-sans">
           <div className="bg-white p-8 rounded-[32px] shadow-xl max-w-2xl w-full border border-slate-200">
             <div className="flex items-center gap-4 mb-6 text-red-600">
                 <AlertTriangle size={32} />
                 <h1 className="text-2xl font-bold">Something went wrong</h1>
             </div>
             <p className="text-slate-600 mb-4 font-bold">アプリケーションの実行中にエラーが発生しました。</p>
-            <div className="bg-slate-100 p-4 rounded-xl overflow-auto max-h-64 text-xs font-mono text-slate-700 border border-slate-200">
+            <div className="bg-slate-100 p-4 rounded-xl overflow-auto max-h-64 text-xs font-mono text-slate-700 border border-slate-200 mb-6">
               <p className="font-bold text-red-500 mb-2">{this.state.error && this.state.error.toString()}</p>
               <pre>{this.state.errorInfo && this.state.errorInfo.componentStack}</pre>
             </div>
             <button 
                 onClick={() => window.location.reload()}
-                className="mt-6 w-full py-3 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-900 transition-colors"
+                className="w-full py-3 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-900 transition-colors shadow-lg"
             >
                 ページを再読み込み
             </button>
@@ -81,26 +81,39 @@ class ErrorBoundary extends React.Component {
 
 /**
  * ------------------------------------------------------------------
- * 1. Firebase 初期化 & ユーティリティ (安全策を追加)
+ * 1. Firebase 初期化 & ユーティリティ (安全策強化版)
  * ------------------------------------------------------------------
  */
 
+// グローバル変数として保持
 let app, auth, db;
 let firebaseInitError = null;
 
-try {
-  if (typeof __firebase_config !== 'undefined') {
-    const firebaseConfig = JSON.parse(__firebase_config);
-    app = initializeApp(firebaseConfig);
-    auth = getAuth(app);
-    db = getFirestore(app);
-  } else {
-    console.warn("Firebase config not found. Starting in Demo Mode.");
+// 初期化関数 (try-catchで保護)
+const initFirebase = () => {
+  try {
+    if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+      // 既に初期化されていたら何もしない
+      if (!app) {
+        const firebaseConfig = JSON.parse(__firebase_config);
+        app = initializeApp(firebaseConfig);
+        auth = getAuth(app);
+        db = getFirestore(app);
+      }
+      return { app, auth, db, error: null };
+    } else {
+      console.warn("Firebase config not found. Using Demo Mode.");
+      return { app: null, auth: null, db: null, error: "Config not found" };
+    }
+  } catch (error) {
+    console.error("Firebase initialization failed:", error);
+    firebaseInitError = error;
+    return { app: null, auth: null, db: null, error };
   }
-} catch (error) {
-  console.error("Firebase initialization failed:", error);
-  firebaseInitError = error;
-}
+};
+
+// 初回実行
+initFirebase();
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
@@ -169,7 +182,7 @@ const exportTalentListToCSV = (data, filename) => {
   const headers = ['ID', 'ステータス', '芸名', '性別', '売上', '評価'];
   const csvContent = [
     headers.join(','),
-    ...data.map(t => [t.id, t.status, t.name, t.gender, t.sales, t.rating].map(v => `"${v||''}"`).join(','))
+    ...data.map(t => [t.id, t.status, t.name, t.gender, t.sales, t.rating].map(v => `"${(v||'').toString().replace(/"/g, '""')}"`).join(','))
   ].join('\r\n');
   const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: 'text/csv;charset=utf-8;' });
   const link = document.createElement('a');
@@ -486,7 +499,6 @@ const SalesAnalysisContent = ({ talents, companySalesData, onImportTalentSales, 
         if (headerIndex === -1) { alert("ヘッダーが見つかりません"); return; }
         const salesRow = rows.find((row, i) => i > headerIndex && row[0] && row[0].includes('売上'));
         if (!salesRow) { alert("売上行が見つかりません"); return; }
-        // 簡易的に数値列を抽出
         const sales = salesRow.slice(1).map(v => parseInt((v||'').replace(/[^0-9]/g, '')) || 0).slice(0, 12);
         while(sales.length < 12) sales.push(0);
         onImportCompanySales(sales, yearType);
@@ -598,20 +610,72 @@ const TalentEvaluationsContent = ({ talents, onUpdateEvaluation, onImportEvaluat
 // 7. レッスン管理コンテンツ
 const LessonsContent = ({ lessons, onAddLesson, onDeleteLesson }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [viewMode, setViewMode] = useState('list');
+  const [selectedDate, setSelectedDate] = useState(new Date());
   const [newLesson, setNewLesson] = useState({ title: '', date: new Date().toISOString().split('T')[0], startTime: '10:00', endTime: '12:00', type: 'Acting', location: 'Studio A', instructor: 'Coach' });
   const handleSave = () => { if(!newLesson.title) return; onAddLesson({ ...newLesson, id: generateId() }); setIsModalOpen(false); };
 
+  const calendarDays = useMemo(() => {
+    const year = selectedDate.getFullYear();
+    const month = selectedDate.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const daysInMonth = lastDay.getDate();
+    const startingDayOfWeek = firstDay.getDay();
+    const days = [];
+    for(let i=0; i<startingDayOfWeek; i++) days.push(null);
+    for(let i=1; i<=daysInMonth; i++) days.push(new Date(year, month, i));
+    return days;
+  }, [selectedDate]);
+
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-      <header className="flex justify-between items-center mb-8"><div><h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">レッスン管理</h2></div><button onClick={() => setIsModalOpen(true)} className="px-5 py-3 bg-indigo-600 text-white rounded-xl shadow-lg font-bold text-sm flex items-center"><Plus size={18} className="mr-2" /> 追加</button></header>
-      <div className="space-y-4">
-          {lessons.map(lesson => (
-              <div key={lesson.id} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex justify-between items-start hover:shadow-md transition-all">
-                  <div><h3 className="font-bold text-slate-800">{lesson.title}</h3><p className="text-sm text-slate-500">{lesson.date} {lesson.startTime}-{lesson.endTime} @ {lesson.location}</p></div>
-                  <button onClick={() => onDeleteLesson(lesson.id)} className="text-slate-300 hover:text-red-500 p-2"><Trash2 size={18}/></button>
+      <header className="flex justify-between items-center mb-8">
+          <div><h2 className="text-3xl font-extrabold text-slate-800 tracking-tight">レッスン管理</h2></div>
+          <div className="flex gap-3">
+              <div className="bg-slate-100 p-1 rounded-xl flex">
+                  <button onClick={() => setViewMode('list')} className={`px-4 py-2 rounded-lg text-sm font-bold ${viewMode === 'list' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}><List size={16}/></button>
+                  <button onClick={() => setViewMode('calendar')} className={`px-4 py-2 rounded-lg text-sm font-bold ${viewMode === 'calendar' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}><CalendarIcon size={16}/></button>
               </div>
-          ))}
-      </div>
+              <button onClick={() => setIsModalOpen(true)} className="px-5 py-3 bg-indigo-600 text-white rounded-xl shadow-lg font-bold text-sm flex items-center"><Plus size={18} className="mr-2" /> 追加</button>
+          </div>
+      </header>
+      
+      {viewMode === 'list' ? (
+          <div className="space-y-4">
+              {lessons.map(lesson => (
+                  <div key={lesson.id} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex justify-between items-start hover:shadow-md transition-all">
+                      <div><h3 className="font-bold text-slate-800">{lesson.title}</h3><p className="text-sm text-slate-500">{lesson.date} {lesson.startTime}-{lesson.endTime} @ {lesson.location}</p></div>
+                      <button onClick={() => onDeleteLesson(lesson.id)} className="text-slate-300 hover:text-red-500 p-2"><Trash2 size={18}/></button>
+                  </div>
+              ))}
+          </div>
+      ) : (
+          <div className="bg-white p-8 rounded-[32px] shadow-sm border border-slate-100">
+              <div className="flex justify-between items-start mb-6">
+                  <h3 className="text-xl font-bold text-slate-800">{selectedDate.getFullYear()}年 {selectedDate.getMonth() + 1}月</h3>
+                  <div className="flex space-x-2">
+                      <button onClick={() => setSelectedDate(new Date(selectedDate.setMonth(selectedDate.getMonth() - 1)))} className="p-2 hover:bg-slate-100 rounded-full"><ChevronDown className="rotate-90" /></button>
+                      <button onClick={() => setSelectedDate(new Date(selectedDate.setMonth(selectedDate.getMonth() + 1)))} className="p-2 hover:bg-slate-100 rounded-full"><ChevronDown className="-rotate-90" /></button>
+                  </div>
+              </div>
+              <div className="grid grid-cols-7 gap-4 text-center">
+                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => <div key={day} className="text-xs font-bold text-slate-400 uppercase py-2">{day}</div>)}
+                  {calendarDays.map((day, i) => {
+                      if(!day) return <div key={i} className="h-24"></div>;
+                      const dayStr = day.toISOString().split('T')[0];
+                      const dayLessons = lessons.filter(l => l.date === dayStr);
+                      return (
+                          <div key={i} className="h-24 border border-slate-50 rounded-xl p-2 text-left hover:bg-slate-50 transition-colors relative group">
+                              <span className={`text-sm font-bold ${day.getDay() === 0 ? 'text-red-400' : 'text-slate-700'}`}>{day.getDate()}</span>
+                              <div className="mt-1 space-y-1">{dayLessons.map((l, idx) => <div key={idx} className="text-[10px] truncate px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">{l.startTime} {l.title}</div>)}</div>
+                          </div>
+                      );
+                  })}
+              </div>
+          </div>
+      )}
+
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
             <div className="bg-white rounded-[32px] p-8 max-w-lg w-full shadow-2xl animate-in zoom-in duration-200">
@@ -692,8 +756,12 @@ const TalentForm = ({ talent, onSave, onBack, onDelete, onRetire }) => {
   );
 };
 
-// Main App Component
-const App = () => {
+/**
+ * ------------------------------------------------------------------
+ * Main Logic Component (内部ロジック)
+ * ------------------------------------------------------------------
+ */
+const TalentManager = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [talents, setTalents] = useState(generateMockData());
   const [lessons, setLessons] = useState(generateMockLessons()); 
@@ -778,11 +846,22 @@ const App = () => {
   };
 
   return (
+    <div className="flex min-h-screen bg-slate-50 font-sans text-slate-600">
+      <Sidebar activeTab={activeTab} setActiveTab={(tab)=>{setActiveTab(tab); setSelectedTalent(null); setIsEditing(false);}} onGenerateMock={handleGenerateMock} user={user} isDemoMode={isDemoMode} onLogout={handleLogout} onGoToRegister={handleGoToRegister} onGoToLogin={handleGoToLogin} />
+      <main className="ml-72 flex-1 p-10 h-screen overflow-y-auto">{renderContent()}</main>
+    </div>
+  );
+};
+
+/**
+ * ------------------------------------------------------------------
+ * App Root (ErrorBoundaryでラップ)
+ * ------------------------------------------------------------------
+ */
+const App = () => {
+  return (
     <ErrorBoundary>
-      <div className="flex min-h-screen bg-slate-50 font-sans text-slate-600">
-        <Sidebar activeTab={activeTab} setActiveTab={(tab)=>{setActiveTab(tab); setSelectedTalent(null); setIsEditing(false);}} onGenerateMock={handleGenerateMock} user={user} isDemoMode={isDemoMode} onLogout={handleLogout} onGoToRegister={handleGoToRegister} onGoToLogin={handleGoToLogin} />
-        <main className="ml-72 flex-1 p-10 h-screen overflow-y-auto">{renderContent()}</main>
-      </div>
+      <TalentManager />
     </ErrorBoundary>
   );
 };
